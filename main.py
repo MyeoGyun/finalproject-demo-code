@@ -67,14 +67,14 @@ def get_friends(user_id: int):
     return {"friends": friends_info}
 
 @app.get("/vote/questions")
-def get_random_questions(user_id: int):
+def get_random_questions(user_id: str):  # user_id를 STRING으로 변경
     # 이성친구 목록 가져오기
     query_gender_friends = f"""
         SELECT u.user_name, u.profile_picture_url, u.gender
         FROM `final-project-446409.demo_set.user_table` u
         JOIN `final-project-446409.demo_set.friends_table` f
-        ON CAST(f.friend_id AS STRING) = CAST(u.user_id AS STRING)
-        WHERE CAST(f.user_id AS STRING) = CAST({user_id} AS STRING)
+        ON f.friend_id = u.user_id  -- STRING이므로 CAST 제거
+        WHERE f.user_id = '{user_id}'  -- STRING이므로 따옴표 추가
     """
     
     query_job_friends = client.query(query_gender_friends)
@@ -82,6 +82,16 @@ def get_random_questions(user_id: int):
 
     if not result_friends.total_rows:
         raise HTTPException(status_code=404, detail="No friends found for this user")
+
+    # 사용자의 성별 가져오기 (이성친구와 동성친구 구분을 위해)
+    query_user_gender = f"""
+        SELECT gender
+        FROM `final-project-446409.demo_set.user_table`
+        WHERE user_id = '{user_id}'  -- STRING이므로 따옴표 추가
+    """
+    query_job_user = client.query(query_user_gender)
+    result_user = query_job_user.result()
+    user_gender = next(result_user)["gender"] if result_user.total_rows else "unknown"
 
     male_friends = []  # 남자 친구 리스트
     female_friends = []  # 여자 친구 리스트
@@ -96,8 +106,8 @@ def get_random_questions(user_id: int):
     # 질문 리스트 가져오기 (점수가 NULL이 아닌 질문만)
     query_questions = """
         SELECT question, score
-        FROM `final-project-446409.demo_set.question_table`
-        WHERE score IS NOT NULL  -- NULL 값 필터링
+        FROM `final-project-446409.demo_set.sample_question_table`
+        WHERE score IS NOT NULL
         ORDER BY RAND()
         LIMIT 10
     """
@@ -127,32 +137,49 @@ def get_random_questions(user_id: int):
 
         friends_info = []  # 각 질문에 배정할 친구 리스트 초기화
 
-        # score >= 1.25일 경우 최소 2명의 이성친구 배정
+        # score >= 1.25일 경우 이성친구 및 동성친구 배정 로직
         if score >= 1.25:
-            if len(female_friends) <= 2:
+            # 사용자의 성별에 따라 이성친구 결정
+            opposite_gender_friends = female_friends if user_gender == "male" else male_friends
+            same_gender_friends = male_friends if user_gender == "male" else female_friends
+
+            # 이성친구 수에 따라 배정
+            if len(opposite_gender_friends) <= 2:
                 # 이성친구가 2명 이하일 경우 모든 이성친구 배정
-                for friend in female_friends + male_friends:
+                for friend in opposite_gender_friends:
                     friends_info.append({
                         "user_name": friend["user_name"],
                         "profile_picture": friend["profile_picture_url"]
                     })
             else:
-                # 이성친구가 2명 이상일 경우 랜덤으로 2명씩 배정
-                random.shuffle(female_friends)  # 여자 목록 섞기
-                random.shuffle(male_friends)  # 남자 목록 섞기
-                for friend in female_friends[:2] + male_friends[:2]:
+                # 이성친구가 4명 이상일 경우 2~4명 랜덤 선택
+                num_opposite = random.randint(2, min(4, len(opposite_gender_friends)))
+                random.shuffle(opposite_gender_friends)
+                for friend in opposite_gender_friends[:num_opposite]:
                     friends_info.append({
                         "user_name": friend["user_name"],
                         "profile_picture": friend["profile_picture_url"]
                     })
+
+            # 이성친구가 2~3명만 배정된 경우, 나머지 1~2명은 동성친구로 채움 (총 4명까지)
+            current_count = len(friends_info)
+            if 2 <= current_count <= 3:
+                needed_count = 4 - current_count  # 필요한 동성친구 수 (1 또는 2)
+                random.shuffle(same_gender_friends)
+                for friend in same_gender_friends[:needed_count]:
+                    friends_info.append({
+                        "user_name": friend["user_name"],
+                        "profile_picture": friend["profile_picture_url"]
+                    })
+
         else:
-            # score < 1.25일 경우 이성친구가 아닌 친구들을 무작위로 배정
+            # score < 1.25일 경우 이성친구가 아닌 친구들을 무작위로 배정 (기존 로직 유지)
             query_friends = f"""
                 SELECT u.user_name, u.profile_picture_url
                 FROM `final-project-446409.demo_set.user_table` u
                 JOIN `final-project-446409.demo_set.friends_table` f
-                ON CAST(f.friend_id AS STRING) = CAST(u.user_id AS STRING)
-                WHERE CAST(f.user_id AS STRING) = CAST({user_id} AS STRING)
+                ON f.friend_id = u.user_id  -- STRING이므로 CAST 제거
+                WHERE f.user_id = '{user_id}'  -- STRING이므로 따옴표 추가
                 ORDER BY RAND()
                 LIMIT 4
             """
