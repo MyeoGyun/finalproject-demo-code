@@ -130,10 +130,6 @@ def vote_page():
                         </div>
                         """, unsafe_allow_html=True)
 
-            # # 질문 새로고침 버튼 추가
-            # if st.button("질문 새로고침"):
-            #     st.session_state.refresh = True
-            #     st.rerun()  # 페이지를 새로고침하여 다시 질문을 불러옴
             # 질문 새로고침 버튼 추가
             if st.button("질문 새로고침"):
                 st.session_state.refresh = True
